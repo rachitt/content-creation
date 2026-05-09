@@ -1,107 +1,108 @@
-# Parallel Build Slices
+# Parallel Build Slices (v2 — SQLite + ScrapeGraphAI)
+
+> **Pivot:** Mongo dropped → SQLite via Drizzle. Apify dropped → ScrapeGraphAI Python helper (Ollama backend, no API keys).
 
 Each slice owns one branch + worktree. Coordinate only via:
-- `src/lib/db.ts` types (do not modify, extend in your slice if needed)
+- `src/lib/db/schema.ts` and `src/lib/db/index.ts` (frozen — extend in your slice via new tables only if absolutely needed)
 - `.env.example` (append new vars in your slice)
-- This file (do not modify; contracts are frozen)
+- This file (frozen contracts)
 
 ## Shared types
-All slices import from `src/lib/db.ts`:
-- `ViralPost`, `Template`, `Handle`, `Idea`, `Draft`, `PostRecord`, `Attribution`, `Platform`
-- `collections.{viralPosts, templates, handles, ideas, drafts, posts, attribution}`
+All slices import from `src/lib/db`:
+```ts
+import { getDb, schema, type ViralPost, type Template, type Handle, type Idea, type Draft, type PostRecord, type Attribution, type Platform, parseJson, stringifyJson, newId } from "@/lib/db"; // or relative path
+import { eq, desc, and } from "drizzle-orm";
+```
+
+Tables: `schema.handles`, `schema.viralPosts`, `schema.templates`, `schema.ideas`, `schema.drafts`, `schema.posts`, `schema.attribution`.
+
+JSON columns (text under hood): `viralPosts.embedding`, `viralPosts.tags`, `templates.hookExamples`, etc. → use `parseJson(row.embedding, [])` to read, `stringifyJson(arr)` to write.
+
+DB file: `./data/content.db` (gitignored). Migrations in `./drizzle/`. Run `pnpm db:generate` after schema changes (only if you really must — coordinate first).
 
 ## Slice A — Viral Mine (`slice/viral-mine`)
 Owner files:
-- `src/lib/content/apify.ts` — Apify API client (LinkedIn Post Scraper + Twitter Scraper)
-- `src/lib/content/cluster.ts` — embed + cluster + template extraction
-- `scripts/viral-mine.ts` — daily cron: fetch handles → filter viral → upsert
-- `scripts/viral-cluster.ts` — weekly: cluster + write `templates`
-- `src/app/admin/content/viral/page.tsx` — browse harvested viral posts
-- `src/app/api/content/viral/route.ts` — list/filter viral_posts
+- `src/lib/content/scraper.ts` — Node wrapper around `scripts/scrape/scrape.py`. Spawns `process.env.SCRAPER_PYTHON ./scripts/scrape/scrape.py`, writes JSON job to stdin, reads JSON from stdout. 90s timeout. Functions: `scrapeLinkedInProfile(handle, limit)`, `scrapeXProfile(handle, limit)`, `scrapeSinglePost(url)`. If Python or Ollama unavailable, return `{ok:false, error}` and let caller no-op.
+- `src/lib/content/cluster.ts` — embeddings (use `@xenova/transformers` `Xenova/all-MiniLM-L6-v2`, local, no API key) + k-means (k=8, write inline). Export `cosineSimilarity(a, b)` for Slice B.
+- `scripts/viral-mine.ts` — load `src/content/brand/handles.yaml` → for each handle call scraper → filter by thresholds (from yaml) → upsert to `viralPosts` table. Use Drizzle `insert().onConflictDoUpdate({target: viralPosts.url, set: ...})`.
+- `scripts/viral-cluster.ts` — load all `viralPosts` lacking `embedding` → embed → write back → cluster all → write `templates` (stub archetype labels with TODO; Slice B provides claude.ts later).
+- `src/app/admin/content/viral/page.tsx` — server component listing viral posts, filters: platform, cluster, min likes
+- `src/app/api/content/viral/route.ts` — GET endpoint with filters
 
-Reads: `src/content/brand/handles.yaml`, `viral_posts`, `templates`.
-Writes: `viral_posts`, `templates`.
-Env: `APIFY_TOKEN`.
-Apify actors:
-- LI: `apify/linkedin-post-scraper` (or `dev_fusion/linkedin-profile-posts-scraper`)
-- X: `apidojo/twitter-scraper`
+**Add to `.env.example`**: nothing new (scraper vars already there).
+**Add deps**: `@xenova/transformers`, `js-yaml`, `@types/js-yaml`.
 
-Embedding: use Voyage AI free tier OR `@xenova/transformers` local (no API key). Cluster with k-means or HDBSCAN (small N — k-means with k=8 is fine v1).
-
-Template extraction: feed top 5 posts per cluster to `claude -p` → returns archetype label + structure pattern. Use `src/lib/content/claude.ts` (built by Slice B — stub it locally if needed during dev).
-
-Plagiarism guard: export `cosineSimilarity(a, b)` for Slice B to use.
+**Constraints:**
+- Touch nothing outside owner list except `.env.example`, `package.json`, and `src/content/brand/handles.yaml` (read-only).
+- Do NOT modify `src/lib/db/`.
+- ScrapeGraphAI Python deps live in `scripts/scrape/` venv; the helper script `scripts/scrape/scrape.py` already exists. Just call it.
 
 ## Slice B — Voice & Forge (`slice/voice-forge`)
 Owner files:
-- `src/lib/content/claude.ts` — `claude -p` subprocess wrapper. Spawn `claude -p --output-format stream-json` (or simpler `claude -p "<prompt>"`) and capture stdout. NO `langchain-anthropic`, NO API key.
-- `src/lib/content/voice.ts` — load `BRAND.md`, `voice-samples.md`, `icp.md`, build prompt
-- `src/content/brand/BRAND.md` — expand voice contract
-- `src/content/brand/voice-samples.md` — populated by ingest-handles
+- `src/lib/content/claude.ts` — wrapper around `claude -p "<prompt>"` via `child_process.spawn`. Capture stdout. 60s timeout. Reject if `claude` binary missing. NO `langchain-anthropic`, NO API keys.
+- `src/lib/content/voice.ts` — `loadBrand()` reads `BRAND.md`, `voice-samples.md`, `icp.md`. `buildForgePrompt({topic, channel, format, template, viralSourceTexts, recentDraftBodies})` returns string.
+- `src/content/brand/BRAND.md` — expand stub
+- `src/content/brand/voice-samples.md` — placeholder + 3 LI + 5 X hand-written samples
 - `src/content/brand/icp.md` — expand
-- `scripts/content-new.ts` — CLI: `pnpm content:new "topic" [--channel=li|x] [--format=single|thread]`
-- `scripts/ingest-handles.ts` — one-time: mine OWN LI/X via Apify (reuse Slice A's apify.ts) → distill voice DNA into voice-samples.md
-- `src/app/api/content/generate/route.ts` — POST endpoint wrapping content-new flow
+- `scripts/content-new.ts` — CLI: `pnpm content:new "<topic>" [--channel=li|x] [--format=single|thread]`. Reads brand → picks template (least-recently-used, diverse archetype) via Drizzle query → fetches 3 source viral posts → builds prompt → claude.ts → parses 3 variants → inserts as `Draft` rows (`status: "draft"`).
+- `scripts/ingest-handles.ts` — one-time: read `OWN_LINKEDIN_HANDLE`, `OWN_X_HANDLE` env → call Slice A's `scraper.ts` → distill into `voice-samples.md`.
+- `src/app/api/content/generate/route.ts` — POST `{topic, channel, format}` → returns 3 draft IDs.
 
-Reads: brand files, `viral_posts`, `templates` (when picking template).
-Writes: `drafts`.
-Env: none (uses local `claude` CLI).
+**Add to `.env.example`**: vars already there (`OWN_LINKEDIN_HANDLE`, `OWN_X_HANDLE`).
 
-Forge prompt structure (assemble in `voice.ts`):
-1. SYSTEM: BRAND.md + banned words enforcement
-2. CONTEXT: ICP.md vertical for the topic
-3. STYLE ANCHOR: 3 raw viral source posts from chosen template
-4. STRUCTURE: template's `structure` field
-5. TASK: write 3 variants for `<topic>` on `<channel>`
-6. CONSTRAINTS: cooldown (no template reused 14d), no emoji, no banned words
-
-Output 3 variants → insert as `Draft` rows with `status: "draft"`, `viralSourceIds`, `templateId`.
-
-After generation: call `cosineSimilarity` (from Slice A) vs each `viralSourceIds`. If max > 0.85 → flag `similarityScore` and `status: "killed"`.
+**Constraints:**
+- Touch nothing outside owner list.
+- If Slice A's `scraper.ts`/`cluster.ts` not yet in main, write `// TODO: import from slice A` comments and stub locally.
 
 ## Slice C — Buffer + Admin UI (`slice/buffer-ui`)
 Owner files:
-- `src/lib/content/buffer.ts` — Buffer API client (OAuth flow + schedule endpoint)
-- `src/app/admin/content/page.tsx` — pipeline dashboard (counts per status)
-- `src/app/admin/content/drafts/page.tsx` — list drafts, edit, approve, schedule
-- `src/app/admin/content/queue/page.tsx` — calendar view of scheduled posts
-- `src/app/admin/layout.tsx` — admin shell + nav
-- `src/app/api/content/schedule/route.ts` — POST → push to Buffer queue → update Draft.bufferId/scheduledAt/status
-- `src/app/api/auth/buffer/route.ts` — OAuth callback
+- `src/lib/content/buffer.ts` — Buffer API client (PAT auth via `BUFFER_TOKEN`). Functions: `schedulePost({channel, body, scheduledAt, mediaUrl?})`, `getProfiles()`, `getQueue(profileId)`.
+- `src/app/admin/layout.tsx` — admin shell, sidebar (Pipeline, Drafts, Queue, Viral, Ideas, Attribution). Brand tokens.
+- `src/app/admin/content/page.tsx` — pipeline dashboard (counts per `Draft.status` via `select count`)
+- `src/app/admin/content/drafts/page.tsx` — list + edit + approve + schedule
+- `src/app/admin/content/queue/page.tsx` — 14-day calendar
+- `src/app/api/content/schedule/route.ts` — POST `{draftId, scheduledAt?}` → buffer push → update Draft
+- `src/app/api/content/drafts/[id]/approve/route.ts` — POST → set status `approved`
+- `src/app/api/content/drafts/route.ts` — GET (filter by status) + PATCH (edit body)
+- `src/lib/content/slots.ts` — slot strategy: X 4/day at 9/13/17/21 ET, LI 5/wk Tue/Wed/Thu 8am+2pm. Export `nextAvailableSlot(channel, after?)`.
 
-Reads: `drafts`, `posts`.
-Writes: `drafts`, `posts`.
-Env: `BUFFER_TOKEN`, `BUFFER_CLIENT_ID`, `BUFFER_CLIENT_SECRET`.
+**Add to `.env.example`**: vars already there (`BUFFER_TOKEN`, `BUFFER_LINKEDIN_PROFILE_ID`, `BUFFER_X_PROFILE_ID`).
 
-Slot strategy for X 4/day: 9am, 1pm, 5pm, 9pm America/New_York. LI 5/wk: Tue/Wed/Thu 8am + 2pm. Round-robin from approved queue.
+**Constraints:** brand tokens via `var(--c-cyan)` etc. Server components for fetching, client components only for interactive bits.
 
 ## Slice D — Idea Inbox + Radar + Repurposer (`slice/idea-inbox`)
 Owner files:
-- `src/app/admin/content/ideas/page.tsx` — list + create + score + select
-- `src/app/api/content/ideas/route.ts` — CRUD
-- `scripts/daily-radar.ts` — scrape HN front page, r/SaaS, r/startups, r/legaltech, r/healthIT → score → upsert to `ideas`. Use simple keyword-match scoring against `icp.md` keywords.
-- `src/lib/content/repurpose.ts` — input: long text → output: 5 LI + 10 X + 2 threads via Slice B's `claude.ts`
+- `src/app/admin/content/ideas/page.tsx` — list + select + forge buttons
+- `src/app/api/content/ideas/route.ts` — GET (filters) + POST (manual create)
+- `src/app/api/content/ideas/[id]/route.ts` — PATCH/DELETE
+- `src/app/api/content/ideas/[id]/select/route.ts` — set status `selected`
+- `src/app/api/content/ideas/[id]/forge/route.ts` — call Slice B's generate
+- `scripts/daily-radar.ts` — HN top 50 + r/SaaS r/startups r/legaltech r/healthIT (User-Agent header) → score → upsert
+- `scripts/daily-digest.ts` — top 5 unselected → email via Resend
+- `src/lib/content/repurpose.ts` — input long text → 5 LI + 10 X + 2 threads via Slice B's claude.ts
+- `src/lib/content/radar.ts` — `extractKeywords(icpText)`, `scoreIdea(text, keywords)`
 - `src/app/api/content/repurpose/route.ts` — POST endpoint
-- Daily digest email via Resend (8am cron) — top 5 ideas → user
 
-Reads: `ideas`, brand files.
-Writes: `ideas`, `drafts` (via repurpose).
-Env: `RESEND_API_KEY`, `RESEND_FROM`.
+**Add to `.env.example`**: vars already there (`OPERATOR_EMAIL`, `RESEND_API_KEY`).
+
+**Constraints:** dedupe ideas by URL. Skip writes if no DB writable (graceful dry-run logging).
 
 ## Slice E — Lead Capture (`slice/lead-capture`)
 Owner files:
-- `src/app/audit/page.tsx` — Calendly embed + UTM ping to `/api/content/attribution`
-- `src/app/api/content/attribution/route.ts` — log view/click/book events
-- `src/app/api/webhooks/calendly/route.ts` — Calendly webhook → match utm → update `posts.leads`
-- `src/app/admin/content/attribution/page.tsx` — leaderboard: posts by leads_per_view
-- `src/lib/content/attribution.ts` — UTM helpers (build/parse `utm_campaign={postId}`)
+- `src/lib/content/attribution.ts` — `buildAuditUrl({postId, channel, baseUrl})`, `parseUtm(searchParams)`
+- `src/app/audit/page.tsx` — server component, dark on-brand, Calendly embed
+- `src/app/audit/track-view.tsx` — client component, fires POST to attribution endpoint on mount
+- `src/app/api/content/attribution/route.ts` — POST `{utm_campaign, utm_source, eventType}` → insert `attribution`
+- `src/app/api/webhooks/calendly/route.ts` — HMAC-verify with `CALENDLY_WEBHOOK_SECRET`. On `invitee.created` → match `posts.id = utm_campaign` → `posts.leads += 1` + `attribution {eventType:"book"}`
+- `src/app/admin/content/attribution/page.tsx` — leaderboard
 
-Reads: `posts`, `attribution`.
-Writes: `attribution`, `posts.leads`.
-Env: `CALENDLY_TOKEN`, `CALENDLY_URL`, `CALENDLY_WEBHOOK_SECRET`.
+**Add to `.env.example`**: vars already there.
+
+**Constraints:** graceful when env vars missing. NO emoji. Brand tokens.
 
 ## Coordination rules
-- DO NOT modify files outside your owner list (except adding env vars to `.env.example`).
-- If you need a function from another slice that doesn't exist yet, stub it locally with `TODO: from slice X` comment.
-- Commit small, push often to your branch.
-- Final integration done on `main` after all slices land.
+- DO NOT modify files outside your owner list (only `.env.example` additions and own slice's `package.json` deps).
+- If you need a function from another slice that doesn't exist yet, stub it locally with `// TODO: from slice X` comment.
+- Commit small. NO co-authored-by. NO emoji in commits.
+- Push to `origin/slice/<your-slice>` when done.
+- Final integration on `main` after all slices land via PR review.
