@@ -8,8 +8,6 @@ const EMPTY_RESULT: RepurposeResult = { liPosts: [], xPosts: [], xThreads: [] };
 
 async function loadRunClaude(): Promise<((prompt: string) => Promise<string>) | null> {
   try {
-    // TODO: import from slice B when src/lib/content/claude.ts is present.
-    // @ts-expect-error Slice B owns this module and may not exist in this worktree.
     const mod = (await import("./claude")) as { runClaude?: (prompt: string) => Promise<string> };
     return typeof mod.runClaude === "function" ? mod.runClaude : null;
   } catch {
