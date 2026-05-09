@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --bg-0: #05070B;
+  --bg-1: #0A0D14;
+  --ink: #E7ECF3;
+  --ink-dim: #8A93A4;
+  --line: rgba(220, 232, 248, 0.55);
+  --line-soft: rgba(220, 232, 248, 0.22);
+  --brand-ice: #8DE1FF;
+  --brand-glacier: #4C83FF;
+  --brand-amber: #F4B35E;
+  --logo-cyan: #76FFF7;
+  --c-cyan: var(--brand-ice);
+  --c-orange: #FF8A3D;
+  --c-magenta: #FF5AD1;
+  --c-green: #7BFF9A;
+  --c-blue: #6AA8FF;
+  --grid: rgba(120, 160, 220, 0.07);
+  --grid-strong: rgba(120, 160, 220, 0.14);
+}
+
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-c-cyan: var(--c-cyan);
+  --color-c-orange: var(--c-orange);
+  --color-c-magenta: var(--c-magenta);
+  --color-c-green: var(--c-green);
+  --color-c-blue: var(--c-blue);
+}
+
+html, body {
+  background: var(--bg-0);
+  color: var(--ink);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+::selection {
+  background: var(--c-cyan);
+  color: var(--bg-0);
+}

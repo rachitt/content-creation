@@ -1,0 +1,37 @@
+# ICP-adjacent creators to mine for viral patterns.
+# Slice A: replace stubs with Rachit's real seed list.
+
+linkedin:
+  - handle: greg-isenberg
+    vertical: agency-founder
+  - handle: marc-louvion
+    vertical: indie-hacker
+  - handle: pieter-levels
+    vertical: indie-hacker
+  - handle: dan-mall
+    vertical: design-systems
+
+x:
+  - handle: levelsio
+    vertical: indie-hacker
+  - handle: marc_louvion
+    vertical: indie-hacker
+  - handle: gregisenberg
+    vertical: agency-founder
+  - handle: theo
+    vertical: dev-influencer
+  - handle: leeerob
+    vertical: dev-influencer
+  - handle: rauchg
+    vertical: dev-influencer
+
+# Thresholds (override per handle in Mongo if needed)
+thresholds:
+  linkedin:
+    minLikes: 500
+    minComments: 50
+    minEngagementRate: 0.02
+  x:
+    minLikes: 1000
+    minRetweets: 100
+    minEngagementRate: 0.01
