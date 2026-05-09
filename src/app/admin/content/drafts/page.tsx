@@ -53,14 +53,6 @@ export default function DraftsPage() {
                   {formatDate(draft.createdAt)}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    popoverTarget={`edit-${draft.id}`}
-                    className="h-9 rounded-md border px-3 font-mono text-xs uppercase tracking-wider"
-                    style={{ borderColor: "var(--line-soft)", color: "var(--ink)" }}
-                  >
-                    Edit
-                  </button>
                   <form action={`/api/content/drafts/${draft.id}/approve`} method="post">
                     <button
                       type="submit"
@@ -81,70 +73,11 @@ export default function DraftsPage() {
                     </button>
                   </form>
                 </div>
-                <div
-                  id={`edit-${draft.id}`}
-                  popover="auto"
-                  className="m-auto w-[min(720px,calc(100vw-32px))] rounded-md border border-line-soft bg-bg-0 p-5 text-ink shadow-2xl backdrop:bg-black/60"
-                >
-                  <form data-action="edit" data-id={draft.id} className="flex flex-col gap-4">
-                    <div>
-                      <div className="font-mono text-xs uppercase tracking-widest text-c-cyan">Edit draft</div>
-                      <h2 className="mt-2 text-xl font-semibold">{draft.hook || "Untitled draft"}</h2>
-                    </div>
-                    <textarea
-                      name="body"
-                      defaultValue={draft.body}
-                      className="min-h-64 resize-y rounded-md border border-line-soft bg-bg-1 p-3 text-sm leading-6 text-ink outline-none focus:border-c-cyan"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        popoverTarget={`edit-${draft.id}`}
-                        popoverTargetAction="hide"
-                        className="rounded-md border border-line-soft px-3 py-2 font-mono text-xs uppercase tracking-wider text-ink"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wider"
-                        style={{ background: "var(--c-cyan)", color: "var(--bg-0)" }}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </form>
-                </div>
               </div>
             ))}
           </div>
         )}
       </section>
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-document.addEventListener("submit", async (event) => {
-  const form = event.target.closest("form[data-action='edit']");
-  if (!form) return;
-  event.preventDefault();
-  const submit = form.querySelector("button[type='submit']");
-  if (submit) submit.disabled = true;
-  try {
-    const data = new FormData(form);
-    const response = await fetch("/api/content/drafts", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: form.dataset.id, body: data.get("body") })
-    });
-    if (!response.ok) throw new Error(await response.text());
-    window.location.reload();
-  } finally {
-    if (submit) submit.disabled = false;
-  }
-});
-          `,
-        }}
-      />
     </div>
   );
 }
